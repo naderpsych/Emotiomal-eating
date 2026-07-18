@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>היומן התזונתי שלי</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+<script src="foods.js"></script>
+<style>
+  body { font-family: -apple-system, 'Segoe UI', 'Heebo', Arial, sans-serif; }
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo } = React;
+
+const todayKey = () => new Date().toDateString();
+
+const App = () => {
+  const [meals, setMeals] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('local_meals')) || []; }
+    catch (e) { return []; }
+  });
+  const [showSummary, setShowSummary] = useState(false);
+
+  // שדות הטופס
+  const [foodName, setFoodName] = useState('');
+  const [grams, setGrams] = useState('');
+  const [selectedFood, setSelectedFood] = useState(null); // [שם, קלוריות, חלבון, סוכר, נתרן] ל-100 גרם
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [foodCalories, setFoodCalories] = useState('');
+  const [protein, setProtein] = useState('');
+  const [sugar, setSugar] = useState('');
+  const [sodium, setSodium] = useState('');
+  const [emotion, setEmotion] = useState('');
+  const [location, setLocation] = useState('');
+
+  const goal = 1500;
+  const nutrientTargets = { protein: 90, sugar: 38, sodium: 2300 };
+
+  const emotions = [
+    { id: 'happy', label: 'שמחה', icon: '😊' },
+    { id: 'stressed', label: 'לחץ', icon: '😰' },
+    { id: 'bored', label: 'שעמום', icon: '😐' },
+    { id: 'sad', label: 'עצב', icon: '😔' },
+    { id: 'angry', label: 'כעס', icon: '😠' }
+  ];
+
+  const locations = [
+    { id: 'tv', label: 'מול טלוויזיה', icon: '📺' },
+    { id: 'restaurant', label: 'מסעדה', icon: '🍽️' },
+    { id: 'way', label: 'על הדרך', icon: '🚶' },
+    { id: 'table', label: 'בשולחן', icon: '🏠' },
+    { id: 'work', label: 'בעבודה', icon: '💻' }
+  ];
+
+  const saveMeals = (newMeals) => {
+    setMeals(newMeals);
+    localStorage.setItem('local_meals', JSON.stringify(newMeals));
+  };
+
+  // רק הארוחות של היום מוצגות ונספרות
+  const todayMeals = meals.filter(m => m.date === todayKey());
+
+  const totals = todayMeals.reduce((acc, m) => ({
+    calories: acc.calories + (Number(m.calories) || 0),
+    protein: acc.protein + (Number(m.protein) || 0),
+    sugar: acc.sugar + (Number(m.sugar) || 0),
+    sodium: acc.sodium + (Number(m.sodium) || 0),
+  }), { calories: 0, protein: 0, sugar: 0, sodium: 0 });
+
+  const remaining = goal - totals.calories;
+
+  // חיפוש במאגר צמרת (משרד הבריאות)
+  const suggestions = useMemo(() => {
+    const q = foodName.trim();
+    if (q.length < 2 || selectedFood) return [];
+    const starts = [], contains = [];
+    for (const f of FOODS) {
+      if (f[0].startsWith(q)) starts.push(f);
+      else if (f[0].includes(q)) contains.push(f);
+      if (starts.length >= 8) break;
+    }
+    return starts.concat(contains).slice(0, 8);
+  }, [foodName, selectedFood]);
+
+  const pickFood = (f) => {
+    setSelectedFood(f);
+    setFoodName(f[0]);
+    setShowSuggestions(false);
+    const g = Number(grams) || 100;
+    if (!grams) setGrams('100');
+    applyPortion(f, g);
+  };
+
+  const applyPortion = (f, g) => {
+    const r = g / 100;
+    setFoodCalories(String(Math.round(f[1] * r)));
+    setProtein(String(Math.round(f[2] * r)));
+    setSugar(String(Math.round(f[3] * r)));
+    setSodium(String(Math.round(f[4] * r)));
+  };
+
+  const onGramsChange = (val) => {
+    setGrams(val);
+    if (selectedFood && Number(val) > 0) applyPortion(selectedFood, Number(val));
+  };
+
+  const addMeal = (e) => {
+    if (e) e.preventDefault();
+    if (!foodName || !foodCalories) return;
+
+    const mealData = {
+      id: Date.now().toString(),
+      name: foodName,
+      grams: Number(grams) || null,
+      calories: parseInt(foodCalories) || 0,
+      protein: parseInt(protein) || 0,
+      sugar: parseInt(sugar) || 0,
+      sodium: parseInt(sodium) || 0,
+      emotion,
+      location,
+      timestamp: Date.now(),
+      date: todayKey(),
+      time: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+    };
+
+    saveMeals([mealData, ...meals]);
+
+    setFoodName(''); setGrams(''); setSelectedFood(null);
+    setFoodCalories(''); setProtein(''); setSugar(''); setSodium('');
+    setEmotion(''); setLocation('');
+  };
+
+  const removeMeal = (id) => saveMeals(meals.filter(m => m.id !== id));
+
+  // טיפים יומיים מבוססי התנהגות
+  const getInsight = () => {
+    const hour = new Date().getHours();
+    if (todayMeals.length === 0) {
+      return "מחקרים מראים כי תזמון ותכנון הארוחה הראשונה ביום מסייע במניעת אכילה אימפולסיבית בערב.";
+    }
+    if (todayMeals.some(m => m.emotion === '😰')) {
+      return "אכילה במצבי לחץ מקושרת לעלייה בהורמון הקורטיזול. מומלץ לקחת 3 נשימות עמוקות ולהמתין 5 דקות לפני האכילה.";
+    }
+    if (todayMeals.some(m => m.location === '📺')) {
+      return "מחקרים קליניים מראים שאכילה מול מסכים מפחיתה את תחושת השובע עקב חוסר קשב מודע (Mindless Eating).";
+    }
+    if (totals.protein < 45 && hour > 16) {
+      return "רמת החלבון היומית שלך עדיין נמוכה. חוסר בחלבון בשעות אחה\"צ עלול להגביר את החשק לפחמימות ומתוקים בערב.";
+    }
+    if (totals.calories > goal * 0.85 && hour < 17) {
+      return "צרכת את רוב מכסת הקלוריות יחסית מוקדם. נסי להתמקד בארוחת ערב עשירה בסיבים תזונתיים וירקות כדי להישאר שבעה.";
+    }
+    return "מעקב קבוע אחר המזון מקושר מחקרית להצלחה ארוכת טווח של פי 2 בתהליך הירידה במשקל.";
+  };
+
+  const NutrientProgress = ({ label, current, target, unit, limit }) => {
+    const percentage = Math.min((current / target) * 100, 100);
+    const isExceeded = limit && current > target;
+    const isUnderProtein = !limit && label === "חלבון" && current < target * 0.7;
+
+    let barColor = "bg-blue-500";
+    if (isExceeded) barColor = "bg-red-500";
+    else if (isUnderProtein) barColor = "bg-amber-500";
+    else if (!limit && current >= target) barColor = "bg-green-500";
+
+    return (
+      <div className="space-y-1.5">
+        <div className="flex justify-between items-center text-xs font-semibold">
+          <span className="text-slate-600 flex items-center gap-1">
+            {label}
+            {(isExceeded || isUnderProtein) && <span className={isExceeded ? "text-red-500" : "text-amber-500"}>⚠️</span>}
+          </span>
+          <span className={isExceeded ? 'text-red-500 font-bold' : 'text-slate-700'}>
+            {current} / {target} {unit}
+          </span>
+        </div>
+        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div className={`h-full transition-all duration-500 ${barColor}`} style={{ width: percentage + '%' }} />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 pb-24 text-right" dir="rtl">
+      <div className="max-w-md mx-auto space-y-4">
+
+        {/* כותרת וסיכום יומי */}
+        <header className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-xl font-bold text-slate-800">היומן התזונתי שלי</h1>
+            <button
+              onClick={() => setShowSummary(true)}
+              className="p-2 bg-slate-50 rounded-full text-slate-600 hover:bg-slate-100 transition-colors"
+              title="סיכום ומסקנות"
+            >📊</button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="bg-slate-900 text-white p-4 rounded-2xl text-center">
+              <p className="text-[11px] opacity-70 mb-1">קלוריות שנצרכו</p>
+              <p className="text-2xl font-bold">{totals.calories}</p>
+            </div>
+            <div className="bg-blue-500 text-white p-4 rounded-2xl text-center">
+              <p className="text-[11px] opacity-70 mb-1">קלוריות שנותרו</p>
+              <p className="text-2xl font-bold">{remaining}</p>
+            </div>
+          </div>
+
+          <div className="bg-amber-50 p-3.5 rounded-2xl flex gap-2.5 items-start text-xs text-amber-900 border border-amber-100/50">
+            <span className="shrink-0 mt-0.5">💡</span>
+            <p className="leading-relaxed">{getInsight()}</p>
+          </div>
+        </header>
+
+        {/* מדדים */}
+        <section className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 space-y-4">
+          <h2 className="text-sm font-bold text-slate-800 pb-2 border-b border-slate-100">מצב המדדים להיום</h2>
+          <NutrientProgress label="חלבון" current={totals.protein} target={nutrientTargets.protein} unit="גרם" limit={false} />
+          <NutrientProgress label="סוכרים" current={totals.sugar} target={nutrientTargets.sugar} unit="גרם" limit={true} />
+          <NutrientProgress label="נתרן" current={totals.sodium} target={nutrientTargets.sodium} unit="מ״ג" limit={true} />
+        </section>
+
+        {/* תיעוד ארוחה */}
+        <section className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="font-bold text-slate-800">תיעוד ארוחה</h2>
+            <button
+              disabled
+              title="פיצ'ר עתידי — יגיע בקרוב"
+              className="bg-slate-100 text-slate-400 p-2.5 rounded-2xl flex items-center gap-1.5 text-xs font-semibold cursor-not-allowed"
+            >
+              <span>📷</span><span>צילום מנה — בקרוב</span>
+            </button>
+          </div>
+
+          <form onSubmit={addMeal} className="space-y-4">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="חפש מאכל מהמאגר או הקלד שם..."
+                value={foodName}
+                onChange={e => { setFoodName(e.target.value); setSelectedFood(null); setShowSuggestions(true); }}
+                className="w-full p-3 bg-slate-50 rounded-xl outline-none text-sm text-right border border-transparent focus:border-blue-200 focus:bg-white transition-all"
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute z-20 top-full mt-1 w-full bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden max-h-64 overflow-y-auto">
+                  {suggestions.map((f, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => pickFood(f)}
+                      className="w-full text-right px-4 py-2.5 text-sm hover:bg-blue-50 border-b border-slate-50 last:border-0 flex justify-between items-center gap-2"
+                    >
+                      <span className="text-slate-700 leading-tight">{f[0]}</span>
+                      <span className="text-[10px] text-slate-400 shrink-0">{Math.round(f[1])} קק"ל / 100 ג'</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {selectedFood && (
+              <div className="flex items-center gap-2 bg-blue-50 p-3 rounded-xl border border-blue-100">
+                <label className="text-xs font-semibold text-blue-800 shrink-0">כמות (גרם):</label>
+                <input
+                  type="number"
+                  value={grams}
+                  onChange={e => onGramsChange(e.target.value)}
+                  className="w-24 p-2 bg-white rounded-lg outline-none text-sm text-right border border-blue-100"
+                />
+                <span className="text-[10px] text-blue-600">הערכים מתעדכנים אוטומטית לפי הכמות</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <input type="number" placeholder="קלוריות" value={foodCalories} onChange={e => setFoodCalories(e.target.value)}
+                className="p-3 bg-slate-50 rounded-xl outline-none text-sm text-right border border-transparent focus:border-blue-200 focus:bg-white transition-all" />
+              <input type="number" placeholder="חלבון (ג׳)" value={protein} onChange={e => setProtein(e.target.value)}
+                className="p-3 bg-slate-50 rounded-xl outline-none text-sm text-right border border-transparent focus:border-blue-200 focus:bg-white transition-all" />
+              <input type="number" placeholder="סוכרים (ג׳)" value={sugar} onChange={e => setSugar(e.target.value)}
+                className="p-3 bg-slate-50 rounded-xl outline-none text-sm text-right border border-transparent focus:border-blue-200 focus:bg-white transition-all" />
+              <input type="number" placeholder="נתרן (מ״ג)" value={sodium} onChange={e => setSodium(e.target.value)}
+                className="p-3 bg-slate-50 rounded-xl outline-none text-sm text-right border border-transparent focus:border-blue-200 focus:bg-white transition-all" />
+            </div>
+
+            {/* רגש ומיקום */}
+            <div className="space-y-3 pt-2">
+              <div className="space-y-1.5">
+                <p className="text-xs font-bold text-slate-400 mr-1">איך הרגשת בזמן האוכל?</p>
+                <div className="flex justify-between gap-1">
+                  {emotions.map(em => (
+                    <button
+                      key={em.id}
+                      type="button"
+                      onClick={() => setEmotion(em.icon)}
+                      className={"flex-1 p-2 rounded-xl text-lg transition-all " + (emotion === em.icon ? 'bg-blue-100 border border-blue-200 scale-110 shadow-sm' : 'bg-slate-50 border border-transparent opacity-70 hover:opacity-100')}
+                      title={em.label}
+                    >{em.icon}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                <p className="text-xs font-bold text-slate-400 mr-1">איפה אכלת?</p>
+                <div className="flex flex-wrap gap-1.5 justify-start">
+                  {locations.map(loc => (
+                    <button
+                      key={loc.id}
+                      type="button"
+                      onClick={() => setLocation(loc.icon)}
+                      className={"px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 border " + (location === loc.icon ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-slate-100')}
+                    ><span>{loc.icon}</span> {loc.label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95"
+            >הוספה ושמירה</button>
+          </form>
+        </section>
+
+        {/* יומן אכילה */}
+        <section className="space-y-2">
+          <h3 className="text-[11px] font-bold text-slate-400 mr-2 uppercase tracking-wider">פירוט ארוחות היום</h3>
+          {todayMeals.length === 0 ? (
+            <div className="bg-white/50 border border-dashed border-slate-200 rounded-3xl p-8 text-center text-slate-400 text-sm">
+              טרם תועדו ארוחות להיום.
+            </div>
+          ) : (
+            todayMeals.map(meal => (
+              <div key={meal.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="text-xl bg-slate-50 p-2 rounded-xl w-10 h-10 flex items-center justify-center">
+                    {meal.emotion || '🍴'}
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm text-slate-800 leading-tight">{meal.name}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1">
+                      <span>🕐 {meal.time}</span>
+                      {meal.location && <span>📍 {meal.location}</span>}
+                      {meal.grams && <span>• {meal.grams} ג'</span>}
+                      <span>• {meal.protein}ג חלבון</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <p className="font-bold text-slate-700 text-sm">{meal.calories} קק"ל</p>
+                  <button
+                    onClick={() => removeMeal(meal.id)}
+                    className="text-slate-300 hover:text-red-400 transition-colors p-1"
+                  >🗑️</button>
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+
+        <p className="text-center text-[10px] text-slate-300 pt-2">נתוני מזון: מאגר צמרת, משרד הבריאות</p>
+
+        {/* מודל סיכום יום */}
+        {showSummary && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-6 space-y-5 shadow-2xl text-right">
+              <div className="flex justify-between items-center border-b pb-3">
+                <button onClick={() => setShowSummary(false)} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
+                <h2 className="text-lg font-bold">🧠 מסקנות ודפוסי אכילה</h2>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100">
+                  <p className="text-xs font-bold text-purple-800 mb-1">דפוס בולט היום:</p>
+                  <p className="text-xs text-purple-900 leading-relaxed">
+                    {todayMeals.some(m => m.emotion === '😰')
+                      ? "נמצא קשר בין רמות לחץ גבוהות לבין צריכת קלוריות מהירה. מומלץ לתרגל נשימות להרגעת מערכת העצבים הסימפתטית לפני הארוחה הבאה."
+                      : "ניהלת את היום בצורה מאוזנת רגשית ללא עוררות פיזיולוגית קיצונית המעודדת אכילת יתר."}
+                  </p>
+                </div>
+
+                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                  <p className="text-xs font-bold text-blue-800 mb-1">מצב החלבון היומי:</p>
+                  <p className="text-xs text-blue-900 leading-relaxed">
+                    {totals.protein >= nutrientTargets.protein
+                      ? `הגעת בהצלחה ליעד של ${nutrientTargets.protein} גרם חלבון! זה קריטי לשמירה על מסת השריר וחילוף החומרים.`
+                      : `הגעת ל-${totals.protein} גרם חלבון. חסרים לך עוד ${nutrientTargets.protein - totals.protein} גרם חלבון להגעה ליעד שמירה על מסת השריר.`}
+                  </p>
+                </div>
+
+                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
+                  <p className="text-xs font-bold text-amber-800 mb-1">טיפ מדעי לקראת מחר:</p>
+                  <p className="text-xs text-amber-900 leading-relaxed italic">
+                    שמירה על גירעון קלורי עקבי בטווח של 1500 קלוריות תוך שילוב חלבון גבוה היא השיטה המוכחת ביותר מחקרית לירידה בריאה עד למשקל היעד שלך (63 ק"ג).
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSummary(false)}
+                className="w-full bg-slate-800 text-white py-3 rounded-2xl font-bold hover:bg-slate-700 transition-all active:scale-95"
+              >הבנתי, תודה!</button>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
