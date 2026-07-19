@@ -225,6 +225,8 @@ const App = () => {
       });
       if (!put.ok) throw new Error('upload failed ' + put.status);
       setPhotoStatus('המוח מנתח את התמונה... זה לוקח כמה דקות, אפשר להמשיך בינתיים');
+      // זוכרים שיש תשובה בדרך — כדי להמשיך לבדוק גם אחרי שהמסך כבה או שהדף נטען מחדש
+      localStorage.setItem('pending_photo', JSON.stringify({ resName: 'res-' + batchName, startedAt: Date.now() }));
       pollForResult('res-' + batchName, Date.now());
     } catch (err) {
       console.error(err);
@@ -232,10 +234,11 @@ const App = () => {
     }
   };
 
-  const pollForResult = (resName, startedAt) => {
+  const pollForResult = (resName, startedAt, immediate) => {
     if (pollRef.current) clearTimeout(pollRef.current);
     const poll = async () => {
       if (Date.now() - startedAt > 20 * 60 * 1000) {
+        localStorage.removeItem('pending_photo');
         setPhotoStatus('הניתוח מתעכב — נסה שוב מאוחר יותר או הזן ידנית.');
         return;
       }
@@ -254,6 +257,7 @@ const App = () => {
           if (data.protein !== undefined) setProtein(String(Math.round(Number(data.protein)) || 0));
           if (data.sugar !== undefined) setSugar(String(Math.round(Number(data.sugar)) || 0));
           if (data.sodium !== undefined) setSodium(String(Math.round(Number(data.sodium)) || 0));
+          localStorage.removeItem('pending_photo');
           setPhotoStatus(data.foodName ? 'הניתוח הגיע! בדוק את הערכים ותקן אם צריך.' : 'המוח התקשה לנתח את התמונה — הזן ידנית.');
           // ניקוי הקובץ מה-outbox
           fetch(`https://api.github.com/repos/${BRAIN_REPO}/contents/outbox/${resName}`, {
@@ -266,8 +270,32 @@ const App = () => {
       } catch (err) { /* ממשיכים לנסות */ }
       pollRef.current = setTimeout(poll, 30000);
     };
-    pollRef.current = setTimeout(poll, 60000);
+    pollRef.current = setTimeout(poll, immediate ? 1000 : 60000);
   };
+
+  // חידוש בדיקה אחרי שהמסך כבה, עברו לאפליקציה אחרת או שהדף נטען מחדש
+  useEffect(() => {
+    if (!brainToken) return;
+    const resume = () => {
+      const p = localStorage.getItem('pending_photo');
+      if (!p) return;
+      try {
+        const { resName, startedAt } = JSON.parse(p);
+        if (Date.now() - startedAt > 20 * 60 * 1000) {
+          localStorage.removeItem('pending_photo');
+          return;
+        }
+        setPhotoStatus('בודק אם ניתוח התמונה מוכן...');
+        pollForResult(resName, startedAt, true);
+      } catch (e) {
+        localStorage.removeItem('pending_photo');
+      }
+    };
+    resume();
+    const onVisible = () => { if (!document.hidden) resume(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   const saveToken = (val) => {
     const t = val.trim();
